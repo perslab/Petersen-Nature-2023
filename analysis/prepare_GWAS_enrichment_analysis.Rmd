@@ -1,0 +1,161 @@
+---
+title: "prepare_GWAS_enrichment_analysis"
+author: "Mette Ludwig"
+date: "2022-01-06"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: inline
+---
+
+
+```{r}
+library(DESeq2)
+library(dplyr)
+library(tidyr)
+library(plyr)
+library(forcats)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(VennDiagram)
+library(wesanderson)
+library(stringr)
+library(gprofiler2)
+library(openxlsx)
+library(rlist)
+```
+
+# Load bulk RNA-seq data
+```{r}
+# Mapping data 
+mapping.data <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), 
+                           header = T)
+
+# Bulk data 
+path.meta <- "/projects/mludwig/Petersen-2022/data/bulk/jona-seq_meta.csv"
+path.counts <- "/projects/mludwig/Petersen-2022/data/bulk/jona-seq_counts.csv"
+
+bulk.meta <- read.table(path.meta, sep = ",", header = T, row.names = 1)
+bulk.meta$index.plate.well <- bulk.meta$Index_Plate_Well 
+bulk.meta$sample <- gsub("X", "hypo", bulk.meta$Sample_name)
+bulk.meta$sample <- gsub("_Hy", "", bulk.meta$sample)
+bulk.meta$name <- paste(bulk.meta$sample, bulk.meta$condition, sep = "_")
+bulk.meta <- bulk.meta[,c("name", "sample", "condition", "index.plate.well")]
+
+bulk.counts <- read.table(path.counts, sep = ",", header = T)
+
+# Get gene IDs
+bulk.counts[,1] <- mapping.data$gene_name_optimal[match(bulk.counts[,1], 
+                                                   mapping.data$ensembl_gene_id)]
+bulk.counts <- bulk.counts[!(is.na(bulk.counts[,1])),]
+rownames(bulk.counts) <- bulk.counts[,1]
+bulk.counts <- bulk.counts[,-1]
+
+colnames(bulk.counts) <- gsub("X", "hypo", colnames(bulk.counts))
+colnames(bulk.counts) <- gsub("_Hy", "", colnames(bulk.counts))
+
+# Get treatment groups
+colnames(bulk.counts) <- paste(colnames(bulk.counts), 
+                               bulk.meta$condition[match(colnames(bulk.counts), 
+                                                         bulk.meta$sample)], sep = "_")
+```
+
+# Load mouse to human mapping data
+```{r}
+mapping.data1 <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), header = T)
+mapping.data2 <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/map_hsapiens_mmusculus.gz"), header = T)
+mapping.data3 <- read.csv("/projects/mludwig/DVC/data/gene_info/NCBI37.3.gene.loc", sep = "", header = F)
+colnames(mapping.data3) <- c("ENTREZID", "chr", "start", "end", "strand", "ALIAS")
+```
+
+
+# Repeat GO analysis of differentially expressed genes 
+```{r}
+# vehicle vs. conjugate
+sub.counts <- bulk.counts[, grep("vehicle|conjugate", colnames(bulk.counts))]
+condition <- gsub(".*_", "", colnames(sub.counts))
+condition <- factor(condition, levels = c("vehicle", "conjugate"))
+dds <- DESeqDataSetFromMatrix(sub.counts, DataFrame(condition), ~ condition)
+dds <- DESeq(dds)
+DEGs.conjugate <- results(dds, name="condition_conjugate_vs_vehicle") 
+DEGs.conjugate <- data.frame(DEGs.conjugate)
+
+query <- rownames(DEGs.conjugate)[which(DEGs.conjugate$padj < 0.05)]
+
+module.GO.terms <- gost(query = query,
+                        organism = "mmusculus",
+                        ordered_query = F, correction_method = "fdr",
+                        exclude_iea = T, 
+                        sources = c("GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"),
+                        evcodes = T)
+
+GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value, intersection_size, intersection) %>% 
+  filter(term_size <= 500) %>% arrange(p_value) %>% top_n(5, -p_value) %>%
+  mutate(x = fct_reorder(str_to_title(str_wrap(term_name, 20)), -p_value)) %>% 
+  mutate(y = -log10(p_value)) 
+
+GO.terms
+```
+
+Input for LDSC
+```{r}
+# Extract genes in GO terms
+GO.list <- list()
+for (i in GO.terms$term_name) {
+  GO.genes <- GO.terms$intersection[which(GO.terms$term_name == i)]
+  GO.genes <- str_to_title(GO.genes) 
+  GO.genes <- str_split(GO.genes, pattern = ",")[[1]]
+  GO.genes <- gsub("Mt-", "mt-", GO.genes)
+  GO.genes <- data.frame(gene = GO.genes)
+  GO.list <- list.append(GO.list, GO.genes)
+  names(GO.list)[length(GO.list)] <- i
+}
+
+all.genes <- rownames(bulk.counts)[which(apply(bulk.counts, 1, sd) != 0)]
+GO.data.LDSC <- data.frame(matrix(0, nrow = length(all.genes), ncol = length(GO.list)))
+
+rownames(GO.data.LDSC) <- all.genes
+colnames(GO.data.LDSC) <- names(GO.list)
+  
+for (GO in names(GO.list)) {
+  genes <- GO.list[[GO]]$gene
+  GO.data.LDSC[genes, GO] <- 1
+}
+
+# Map tohuman ENSEMBL IDs
+GO.data.LDSC$gene <- mapping.data1$ensembl_gene_id[match(rownames(GO.data.LDSC), mapping.data1$gene_name_optimal)]
+GO.data.LDSC$gene <- mapping.data2$ensembl_gene_id[
+  match(GO.data.LDSC$gene, mapping.data2$mmusculus_homolog_ensembl_gene)]
+GO.data.LDSC <- GO.data.LDSC[!is.na(GO.data.LDSC$gene),]
+GO.data.LDSC <- GO.data.LDSC[, c("gene", colnames(GO.data.LDSC)[-ncol(GO.data.LDSC)])]
+colnames(GO.data.LDSC) <- gsub("\\ ", "_", colnames(GO.data.LDSC))
+
+write.table(GO.data.LDSC,
+           file = "/projects/mludwig/Petersen-2022/output/LDSC/LDSC_input_GO_genes_conjugate_vs_vehicle.csv",
+            row.names = F, sep = ",")
+```
+
+# Input for MAGMA
+```{r}
+for (i in 1:length(GO.list)) {
+  
+  term <- names(GO.list)[i]
+  genes <- toupper(GO.list[[i]]$gene)
+  GO.data.MAGMA.i <- data.frame(ALIAS = genes)
+  GO.data.MAGMA.i$ENTREZID <- mapping.data3$ENTREZID[match(GO.data.MAGMA.i$ALIAS, mapping.data3$ALIAS)]
+  GO.data.MAGMA.i$set <-  gsub("\\ " , "_", term)
+  GO.data.MAGMA.i <- GO.data.MAGMA.i[!(is.na(GO.data.MAGMA.i$ENTREZID)),]
+  
+   if (i == 1) {
+     GO.data.MAGMA <- GO.data.MAGMA.i
+   }
+   else {
+     GO.data.MAGMA <- rbind(GO.data.MAGMA, GO.data.MAGMA.i)
+   }
+}
+
+write.table(GO.data.MAGMA,
+            file = "/projects/mludwig/Petersen-2022/output/MAGMA/MAGMA_input_GO_genes_conjugate_vs_vehicle.txt",
+          row.names = F, sep = "\t", quote = F, col.names = F)
+```
+
