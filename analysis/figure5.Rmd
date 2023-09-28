@@ -27,7 +27,7 @@ library(openxlsx)
 library(wesanderson)
 ```
 
-# Load data
+# Load RNA-seq data
 ```{r}
 # Mapping data 
 mapping.data <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), header = T)
@@ -66,13 +66,12 @@ bulk.counts <- bulk.counts[, paste0("hypo", seq(1:ncol(bulk.counts)))]
 colnames(bulk.counts) <- paste(colnames(bulk.counts), 
                                bulk.meta$condition[match(colnames(bulk.counts), 
                                                          bulk.meta$sample)], sep = "_")
-
 ```
 
 
 # Compute differentially expressed genes
 ```{r}
-# Vehicle vs. peptide
+# Peptide vs. vehicle
 counts.sub <- bulk.counts[, grep("vehicle|peptide", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "peptide"))
@@ -86,7 +85,7 @@ dds <- DESeq(dds)
 DEGs.peptide <- results(dds, name="condition_peptide_vs_vehicle") 
 DEGs.peptide <- data.frame(DEGs.peptide)
 
-# Vehicle vs. conjugate2
+# Conjugate2 vs. vehicle
 counts.sub <- bulk.counts[, grep("vehicle|conjugate2", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "conjugate2"))
@@ -100,7 +99,7 @@ dds <- DESeq(dds)
 DEGs.conjugate2 <- results(dds, name="condition_conjugate2_vs_vehicle") 
 DEGs.conjugate2 <- data.frame(DEGs.conjugate2)
 
-# Vehicle vs. conjugate1
+# Conjugate1 vs. vehicle 
 counts.sub <- bulk.counts[, grep("vehicle|conjugate1", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "conjugate1"))
@@ -117,51 +116,42 @@ DEGs.conjugate1 <- data.frame(DEGs.conjugate1)
 
 # Figure 5a
 ```{r}
+# Construct venn diagram
 DEGs.peptide.venn <- DEGs.peptide[which(DEGs.peptide$padj < 0.05),]
-DEGs.conjugate2.venn <- DEGs.conjugate2[which(DEGs.conjugate2$padj < 0.05),]
 DEGs.conjugate1.venn <- DEGs.conjugate1[which(DEGs.conjugate1$padj < 0.05),]
 
-genes <- union(union(rownames(DEGs.peptide.venn), rownames(DEGs.conjugate2.venn)),
-               rownames(DEGs.conjugate1.venn))
-venn.data <- data.frame(matrix(0, nrow = length(genes), ncol = 3))
+genes <- union(rownames(DEGs.peptide.venn), rownames(DEGs.conjugate1.venn))
+venn.data <- data.frame(matrix(0, nrow = length(genes), ncol = 2))
 rownames(venn.data) <- genes
-colnames(venn.data) <- c("peptide", "conjugate2", "conjugate1")
+colnames(venn.data) <- c("peptide", "conjugate1")
 
 venn.data$peptide[which(rownames(venn.data) %in% rownames(DEGs.peptide.venn))] <- 1
-venn.data$conjugate2[which(rownames(venn.data) %in% rownames(DEGs.conjugate2.venn))] <- 1
 venn.data$conjugate1[which(rownames(venn.data) %in% rownames(DEGs.conjugate1.venn))] <- 1
 
-pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:4]
+pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:3]
 
 grid.newpage()
 png("/projects/mludwig/Petersen-2022/output/figures/figure5a.png",
     pointsize = 1,
     width = 960, height = 960, res = 2250)
 
-draw.triple.venn(area1 = nrow(subset(venn.data, peptide == 1)), 
-                 area2 = nrow(subset(venn.data, conjugate2 == 1)),
-                 area3 = nrow(subset(venn.data, conjugate1 == 1)), 
-                 n12 = nrow(subset(venn.data, peptide == 1 & conjugate2 == 1)), 
-                 n23 = nrow(subset(venn.data, conjugate2 == 1 & conjugate1 == 1)), 
-                 n13 = nrow(subset(venn.data, peptide == 1 & conjugate1 == 1)), 
-                 n123 = nrow(subset(venn.data, peptide == 1 & conjugate2 == 1 & 
-                                      conjugate1 == 1)), 
-                 category = c("Peptide", "Conjugate2", "Conjugate1"), 
-                 lty = "blank",
-                 fontfamily = "helvetica",
-                 cat.fontfamily = "helvetica",
-                 cat.fontface = "bold",
-                 fill = c(pal[[1]], pal[[2]], pal[[3]]),
-                 cat.dist = .1,
-                 margin = 0.05,
-                 cat.just = list(c(-1.5, 27), c(2, 27), c(0.5, -30))) 
+draw.pairwise.venn(area1 = nrow(subset(venn.data, peptide == 1)), 
+                  area2 = nrow(subset(venn.data, conjugate1 == 1)), 
+                  cross.area = nrow(subset(venn.data, peptide == 1 & conjugate1 == 1)),
+                  category = c("Peptide", "Conjugate1"), 
+                  lty = "blank",
+                  fontfamily = "helvetica",
+                  cat.fontfamily = "helvetica",
+                  cat.fontface = "bold",
+                  fill = c(pal[[1]], pal[[2]]),
+                  margin = 0.05)
 dev.off()
 ```
 
 
 # Figure 5d
 ```{r}
-# Compute DEGs
+# Compute differentially expressed genes for for conjugate1 vs. peptide
 counts.sub <- bulk.counts[, grep("peptide|conjugate1", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("peptide", "conjugate1"))
@@ -175,7 +165,17 @@ dds <- DESeq(dds)
 DEGs <- results(dds, name="condition_conjugate1_vs_peptide") 
 DEGs <- data.frame(DEGs)
 
-# Volcano plot
+# Save output
+DEGs.save <- DEGs[!(is.na(DEGs$padj)), ]
+DEGs.save <- DEGs.save[order(DEGs.save$pvalue),]
+DEGs.save <- cbind(gene = rownames(DEGs.save), DEGs.save)
+
+write.xlsx(DEGs.save, 
+           file = "/projects/mludwig/Petersen-2022/output/DEGs/DEGs_conjugate1_vs_semaglutide.xlsx", 
+           rowNames = F)
+
+
+# Construct volcano plot
 volcano <- DEGs[!(is.na(DEGs$padj)), ]
 volcano$label <- ""
 volcano$label[min_rank(volcano$padj) <= 15] <- rownames(volcano)[min_rank(volcano$padj) <= 15]
@@ -207,19 +207,9 @@ ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5d.png",
        units = "mm")
 ```
 
-```{r}
-DEGs.save<- DEGs[!(is.na(DEGs$padj)), ]
-DEGs.save <- DEGs.save[order(DEGs.save$pvalue),]
-DEGs.save <- cbind(gene = rownames(DEGs.save), DEGs.save)
-
-write.xlsx(DEGs.save, 
-           file = "/projects/mludwig/Petersen-2022/output/DEGs/DEGs_conjugate1_vs_semaglutide.xlsx", rowNames = F)
-
-```
-
-
 # Figure 5c
 ```{r}
+# Identify top GO terms
 query <- rownames(DEGs)[which(DEGs$padj < 0.05)]
 
 module.GO.terms <- gost(query = query,
@@ -234,7 +224,11 @@ GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value, inter
   mutate(x = fct_reorder(str_wrap(term_name, 20), -p_value)) %>% 
   mutate(y = -log10(p_value)) 
 
+# Save 
+write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")], 
+           file = "/projects/mludwig/Petersen-2022/output/GO_terms/GO_terms_conjugate1_vs_semaglutide.xlsx", rowNames = F)
 
+# Plot
 GO.plot <- ggplot(GO.terms, aes(x,y)) + 
   geom_col(colour="black", width=1, fill="#D69C4E", alpha=0.5, size=0.3) +
   theme_pubr(legend="none") + 
@@ -250,18 +244,15 @@ GO.plot <- ggplot(GO.terms, aes(x,y)) +
 GO.plot
 
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5d.png", 
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5c.png", 
        GO.plot, height = 42, width = 70,
        units = "mm")
 ```
 
-```{r}
-write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")], 
-           file = "/projects/mludwig/Petersen-2022/output/GO_terms/GO_terms_conjugate1_vs_semaglutide.xlsx", rowNames = F)
-```
 
-
+# Figure 5b
 ```{r}
+# Identify differentially expressed genes intersecting with top GO terms
 GO.genes <- lapply(GO.terms$intersection, noquote)
 GO.genes <- lapply(GO.genes, function(x) str_split(x, pattern = ","))
 GO.genes <- unique(unlist(GO.genes))
@@ -273,6 +264,7 @@ GO.genes.data$size <- -log10(GO.genes.data$padj)
 GO.genes.data$gene <- rownames(GO.genes.data)
 GO.genes.data$treatment <- "GLP-1/MK-801"
 
+# Plot
 GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
   geom_tile(size = 1, color = "white", fill="grey99") +
   geom_point(aes(size = size, color = log2FoldChange)) + 
@@ -300,65 +292,3 @@ ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5b.png",
        GO.genes.plot, height = 45, width = 180,
        units = "mm")
 ```
-
-# Figure 5x
-```{r}
-genes.peptide <- rownames(DEGs.peptide)[which(DEGs.peptide$padj < 0.05)]
-genes.conjugate1 <- rownames(DEGs.conjugate1)[which(DEGs.conjugate1$padj < 0.05)]
-
-genes.union <- union(genes.peptide, genes.conjugate1)
-genes.intersect <- intersect(genes.peptide, genes.conjugate1)
-
-genes.common <- data.frame(cbind(DEGs.peptide[genes.union, "log2FoldChange"], 
-                                 DEGs.conjugate1[genes.union, "log2FoldChange"]))  
-
-rownames(genes.common) <- genes.union
-
-colnames(genes.common) <- c("Peptide", "Conjugate")
-genes.common$treatment <- ""
-genes.common$treatment[which(genes.union %in% genes.peptide)] <- "Peptide"
-genes.common$treatment[which(genes.union %in% genes.conjugate1)] <- "Conjugate1"
-genes.common$treatment[which(genes.union %in% genes.intersect)] <- "Peptide &\nconjugate1"
-genes.common$treatment <- factor(genes.common$treatment, 
-                                levels = c("Peptide", "Conjugate1", "Peptide &\nconjugate1"))
-
-genes.common <- genes.common[sample(nrow(genes.common)),]
-
-# Colors
-pal <- c("#C27D38", "#CCC591", "#5B1A18")
-
-# Plot
-plot.5x <- ggplot(genes.common, aes(x = Peptide, y = Conjugate, fill = treatment)) + 
-  geom_point(shape = 21, size = 3, alpha = 1)  +
-  xlim(-2.5,2.5) + ylim(-2.5,2.5) +
-  xlab(expression(bold(atop("Log"[2] *" fold-change", "Semaglutide")))) +
-  ylab(expression(bold(atop("Log"[2] *" fold-change", "GLP-1/MK-801")))) +
-  theme_pubr(legend="top") + theme(panel.border = element_blank(), 
-                     panel.grid.major = element_blank(),
-                     panel.grid.minor = element_blank(), 
-                     axis.line = element_line(colour = "black"),
-                     axis.title.x = element_text(size=10, face="bold"),
-                     axis.title.y = element_text(size=10, face="bold"),
-                     axis.text = element_text(size=10, face="bold"),
-                     legend.text = element_text(size=10, face="bold"),
-                     legend.title = element_blank(), 
-                     legend.spacing.x = unit(-0.005, "cm"),
-                     plot.margin = unit(c(0, 0, 0, 0), "cm")) +
-  scale_fill_manual(values = pal, labels = c("Semaglutide", "GLP-1/MK-801", 
-                                             "Semaglutide &\nGLP-1/MK-801")) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-
-plot.5x
-
-```
-
-
-```{r}
-genes.common <- cbind(gene = rownames(genes.common), genes.common)
-write.xlsx(genes.common,
-           file = "/projects/mludwig/Petersen-2022/output/DEGs/genes_cor_conjugate1_vs_peptide.xlsx",
-           rowNames = F)
-```
-
-
-
