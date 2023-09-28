@@ -1,0 +1,485 @@
+---
+title: "efigure11"
+author: "Mette Ludwig"
+date: "2022-01-06"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: inline
+---
+
+
+```{r}
+library(DESeq2)
+library(tximport)
+library(dplyr)
+library(tidyr)
+library(plyr)
+library(forcats)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(VennDiagram)
+library(wesanderson)
+library(stringr)
+library(gprofiler2)
+library(openxlsx)
+library(rlist)
+library(fgsea)
+```
+
+# Load RNA-seq data from the brainstem
+```{r}
+# Load bulk meta data 
+path.meta <- "/projects/mludwig/Petersen-2022/data/bulk/jona-seq3_meta.xslx"
+bulk.meta <- read.xlsx(path.meta)
+bulk.meta$ID <- bulk.meta$`Sample ID.(Library.ID)`
+bulk.meta$ID <- gsub("0230_", "", bulk.meta$ID)
+bulk.meta$tissue <- bulk.meta$`Cell type`
+bulk.meta$tissue <- gsub("Accumbens", "NAc", bulk.meta$tissue)
+bulk.meta$tissue <- gsub("Brain stem", "brainstem", bulk.meta$tissue)
+bulk.meta$condition <- bulk.meta$Condition1
+bulk.meta$condition <- gsub("Vehicle", "vehicle", bulk.meta$condition)
+bulk.meta$condition <- gsub("MK", "molecule", bulk.meta$condition)
+bulk.meta$condition <- gsub("JOP11", "peptide", bulk.meta$condition)
+bulk.meta$condition <- gsub("JOP56", "conjugate", bulk.meta$condition)
+bulk.meta$name <- paste0(bulk.meta$tissue, bulk.meta$ID, "_", bulk.meta$condition)
+bulk.meta <- bulk.meta[,c("name", "ID", "tissue", "condition")]
+rownames(bulk.meta) <- bulk.meta$name
+
+# Load bulk count data
+txi <- readRDS("/projects/mludwig/Petersen-2022/data/bulk/jona-seq3_txi.rds")
+
+# Get gene IDs
+mapping.data <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), 
+                           header = T)
+gene.names <- mapping.data$gene_name_optimal[match(rownames(txi[[1]]), 
+                                                   mapping.data$ensembl_gene_id)]
+txi[[1]] <- txi[[1]][!(is.na(gene.names)),]
+rownames(txi[[1]]) <- as.character(na.omit(gene.names))
+txi[[2]] <- txi[[2]][!(is.na(gene.names)),]
+rownames(txi[[2]]) <- as.character(na.omit(gene.names))
+txi[[3]] <- txi[[3]][!(is.na(gene.names)),]
+rownames(txi[[3]]) <- as.character(na.omit(gene.names))
+
+
+# Subset brainstem
+txi.brainstem <- vector(length = length(txi), mode = "list")
+names(txi.brainstem) <- names(txi)
+txi.brainstem[[1]] <- txi[[1]][, grep("brainstem", colnames(txi[[1]]))]
+txi.brainstem[[2]] <- txi[[2]][, grep("brainstem", colnames(txi[[2]]))]
+txi.brainstem[[3]] <- txi[[3]][, grep("brainstem", colnames(txi[[3]]))]
+txi.brainstem[[4]] <- txi[[4]]
+bulk.meta.brainstem <- bulk.meta[which(bulk.meta$tissue == "brainstem"),]
+```
+
+
+# Compute differentially expressed genes
+```{r}
+# Peptide vs. vehicle 
+txi.sub <- vector(length = length(txi.brainstem), mode = "list")
+names(txi.sub) <- names(txi.brainstem)
+txi.sub[[1]] <- txi.brainstem[[1]][, grep("vehicle|peptide", colnames(txi.brainstem[[1]]))]
+txi.sub[[2]] <- txi.brainstem[[2]][, grep("vehicle|peptide", colnames(txi.brainstem[[2]]))]
+txi.sub[[3]] <- txi.brainstem[[3]][, grep("vehicle|peptide", colnames(txi.brainstem[[3]]))]
+txi.sub[[4]] <- txi.brainstem[[4]]
+
+bulk.meta.sub <- bulk.meta.brainstem[grep("vehicle|peptide", bulk.meta.brainstem$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "peptide"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.peptide <- results(dds, name="condition_peptide_vs_vehicle") 
+DEGs.peptide <- data.frame(DEGs.peptide)
+
+# Molecule vs. vehicle
+txi.sub <- vector(length = length(txi.brainstem), mode = "list")
+names(txi.sub) <- names(txi.brainstem)
+txi.sub[[1]] <- txi.brainstem[[1]][, grep("vehicle|molecule", colnames(txi.brainstem[[1]]))]
+txi.sub[[2]] <- txi.brainstem[[2]][, grep("vehicle|molecule", colnames(txi.brainstem[[2]]))]
+txi.sub[[3]] <- txi.brainstem[[3]][, grep("vehicle|molecule", colnames(txi.brainstem[[3]]))]
+txi.sub[[4]] <- txi.brainstem[[4]]
+
+bulk.meta.sub <- bulk.meta.brainstem[grep("vehicle|molecule", bulk.meta.brainstem$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "molecule"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.molecule <- results(dds, name="condition_molecule_vs_vehicle") 
+DEGs.molecule <- data.frame(DEGs.molecule)
+
+# Conjugate vs. vehicle 
+txi.sub <- vector(length = length(txi.brainstem), mode = "list")
+names(txi.sub) <- names(txi.brainstem)
+txi.sub[[1]] <- txi.brainstem[[1]][, grep("vehicle|conjugate", colnames(txi.brainstem[[1]]))]
+txi.sub[[2]] <- txi.brainstem[[2]][, grep("vehicle|conjugate", colnames(txi.brainstem[[2]]))]
+txi.sub[[3]] <- txi.brainstem[[3]][, grep("vehicle|conjugate", colnames(txi.brainstem[[3]]))]
+txi.sub[[4]] <- txi.brainstem[[4]]
+
+bulk.meta.sub <- bulk.meta.brainstem[grep("vehicle|conjugate", bulk.meta.brainstem$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "conjugate"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.conjugate <- results(dds, name="condition_conjugate_vs_vehicle") 
+DEGs.conjugate <- data.frame(DEGs.conjugate)
+
+# Save
+DEGs.conjugate.save <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
+DEGs.conjugate.save <- DEGs.conjugate.save[order(DEGs.conjugate.save$pvalue),]
+DEGs.conjugate.save <- cbind(gene = rownames(DEGs.conjugate.save), DEGs.conjugate.save)
+
+write.xlsx(DEGs.conjugate.save, 
+           file = "/projects/mludwig/Petersen-2022/output/DEGs/brainstem_DEGs_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
+```
+
+
+# Extented figure 11b
+```{r}
+# Construct venn diagram
+DEGs.peptide.venn <- DEGs.peptide[which(DEGs.peptide$padj < 0.05),]
+DEGs.molecule.venn <- DEGs.molecule[which(DEGs.molecule$padj < 0.05),]
+DEGs.conjugate.venn <- DEGs.conjugate[which(DEGs.conjugate$padj < 0.05),]
+
+genes <- union(union(rownames(DEGs.peptide.venn), rownames(DEGs.molecule.venn)), rownames(DEGs.conjugate.venn))
+venn.data <- data.frame(matrix(0, nrow = length(genes), ncol = 3))
+rownames(venn.data) <- genes
+colnames(venn.data) <- c("peptide", "molecule", "conjugate")
+
+venn.data$peptide[which(rownames(venn.data) %in% rownames(DEGs.peptide.venn))] <- 1
+venn.data$molecule[which(rownames(venn.data) %in% rownames(DEGs.molecule.venn))] <- 1
+venn.data$conjugate[which(rownames(venn.data) %in% rownames(DEGs.conjugate.venn))] <- 1
+
+# Plot
+pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:4]
+grid.newpage()
+png("/projects/mludwig/Petersen-2022/output/figures/efigure11b.png",
+    pointsize = 1,
+    width = 960, height = 960, res = 2250)
+draw.triple.venn(area1 = nrow(subset(venn.data, peptide == 1)), 
+                 area2 = nrow(subset(venn.data, molecule == 1)),
+                 area3 = nrow(subset(venn.data, conjugate == 1)), 
+                 n12 = nrow(subset(venn.data, peptide == 1 & molecule == 1)), 
+                 n23 = nrow(subset(venn.data, molecule == 1 & conjugate == 1)), 
+                 n13 = nrow(subset(venn.data, peptide == 1 & conjugate == 1)), 
+                 n123 = nrow(subset(venn.data, peptide == 1 & molecule == 1 & 
+                                      conjugate == 1)), 
+                 category = c("Peptide", "Molecule", "Conjugate"), 
+                 lty = "blank",
+                 fontfamily = "helvetica",
+                 cat.fontfamily = "helvetica",
+                 cat.fontface = "bold",
+                 fill = c(pal[[1]], pal[[2]], pal[[3]]),
+                 cat.dist = .1,
+                 margin = 0.05,
+                 cat.just = list(c(-1.5, 27), c(2, 27), c(0.5, -30))) 
+dev.off()
+```
+
+# Extended figure 11c 
+```{r}
+# Construct volcano plot
+volcano <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
+volcano$label <- ""
+volcano$label[min_rank(volcano$padj) <= 15] <- rownames(volcano)[min_rank(volcano$padj) <= 15]
+volcano$col <- 4
+volcano$col[which(volcano$padj <= 0.05 & abs(volcano$log2FoldChange) >= 0.5)] <- 1
+volcano$col[which(volcano$padj <= 0.05 & abs(volcano$log2FoldChange) < 0.5)] <- 2
+volcano$col[which(volcano$padj > 0.05 & abs(volcano$log2FoldChange) >= 0.5)] <- 3
+volcano <- data.frame(volcano[, c("log2FoldChange", "padj", "col", "label")])
+
+# Plot
+volcano.plot <- ggplot(volcano, aes(y=(-log10(padj)), x=log2FoldChange, 
+                                    fill=factor(col), label=label)) +
+  xlab(expression(bold(paste(Log[2], " fold-change")))) + 
+  ylab(expression(paste(bold(-log[10]),bold("("), bolditalic("P"),
+                                   bold(")")))) + 
+  geom_point(shape = 21, size = 3, alpha = 1) + 
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-.5, .5), linetype = "dashed") + 
+  geom_text_repel(fontface="bold", size=3, color = "black") + theme_pubr() + 
+      theme(legend.position = "none",
+            axis.title = element_text(size=10, face="bold"),
+            axis.text = element_text(size=10, face="bold"))  + 
+      scale_fill_manual(values = c("1" = "#960000", "2" = "#CC9999", 
+                                   "3" = "grey40", "4" = "grey80")) 
+volcano.plot
+
+ggsave("/projects/mludwig/Petersen-2022/output/figures/efigure11c.png", volcano.plot, height = 120, width = 180,
+       units = "mm")
+```
+
+
+# Extended figure 11d
+```{r}
+# Identify top GO terms for differentially expressed genes
+query <- rownames(DEGs.conjugate.venn)
+
+module.GO.terms <- gost(query = query,
+                        organism = "mmusculus",
+                        ordered_query = F, correction_method = "fdr",
+                        exclude_iea = T, 
+                        sources = c("GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"),
+                        evcodes = T)
+
+GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value, intersection_size, intersection, term_id) %>%
+  filter(term_size <= 500) %>% filter(intersection_size >= 3) %>% arrange(p_value) %>% top_n(5, -p_value) %>%
+  mutate(x = fct_reorder(str_wrap(term_name, 20), -p_value)) %>%
+  mutate(y = -log10(p_value))
+
+# Save
+write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")],
+           file = "/projects/mludwig/Petersen-2022/output/GO_terms/brainstem_GO_terms_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
+
+# Plot
+GO.plot <- ggplot(GO.terms, aes(x,y)) + 
+  geom_col(colour="black", width=1, fill="#D69C4E", alpha=0.5, size=0.3) +
+  theme_pubr(legend="none") + 
+  theme(axis.text.x = element_text(size=8, face="bold"),
+        axis.text.y = element_text(size=8, face="bold"),
+        axis.title.x = element_text(size=8, face="bold"),
+        # margin: top, right, bottom, and left
+        plot.margin = unit(c(0, 0.5, 0, 0), "cm")) +
+  ggsci::scale_fill_lancet() +
+  coord_flip() +
+  xlab(NULL) + ylab(expression(paste(bold(-log[10]),bold("("),
+                                       bolditalic("P"),bold(")")))) 
+GO.plot
+
+ggsave("/projects/mludwig/Petersen-2022/output/figures/efigure11d.png", GO.plot, height = 42, width = 70,
+       units = "mm")
+```
+
+
+# Extended figure 11e, f
+```{r}
+# Identify top GO terms for upregulated genes
+query.up <- rownames(DEGs.conjugate.venn)[which(sign(DEGs.conjugate.venn$log2FoldChange) == 1)]
+module.GO.terms.up <- gost(query = query.up,
+                        organism = "mmusculus",
+                        ordered_query = F, correction_method = "fdr",
+                        exclude_iea = T, 
+                        sources = c("GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"),
+                        evcodes = T)
+
+GO.terms.up <- module.GO.terms.up[[1]] %>% select(term_name, term_size, p_value, intersection_size, intersection) %>% 
+  filter(term_size <= 500) %>% arrange(p_value) %>% top_n(5, -p_value) %>%
+  mutate(x = fct_reorder(str_to_title(str_wrap(term_name, 20)), -p_value)) %>% 
+  mutate(y = -log10(p_value)) 
+GO.terms.up$direction <- "up"
+
+# Identify top GO terms for downregulated genes
+query.down <- rownames(DEGs.conjugate.venn)[which(sign(DEGs.conjugate.venn$log2FoldChange) == -1)]
+module.GO.terms.down <- gost(query = query.down,
+                        organism = "mmusculus",
+                        ordered_query = F, correction_method = "fdr",
+                        exclude_iea = T, 
+                        sources = c("GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"),
+                        evcodes = T)
+
+GO.terms.down <- module.GO.terms.down[[1]] %>% select(term_name, term_size, p_value, intersection_size, intersection) %>% 
+  filter(term_size <= 500) %>% arrange(p_value) %>% top_n(5, -p_value) %>%
+  mutate(x = fct_reorder(str_to_title(str_wrap(term_name, 20)), -p_value)) %>% 
+  mutate(y = -log10(p_value)) 
+GO.terms.down$direction <- "down"
+
+# Merge
+GO.terms <- rbind(GO.terms.up, GO.terms.down)
+
+# Save
+write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")],
+           file = "/projects/mludwig/Petersen-2022/output/GO_terms/brainstem_GO_terms_up_and_down_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
+```
+
+
+# Load RNA-seq data from the nucleus accumbens
+```{r}
+# Load bulk meta data 
+path.meta <- "/projects/mludwig/Petersen-2022/data/bulk/jona-seq3_meta.xslx"
+bulk.meta <- read.xlsx(path.meta)
+bulk.meta$ID <- bulk.meta$`Sample ID.(Library.ID)`
+bulk.meta$ID <- gsub("0230_", "", bulk.meta$ID)
+bulk.meta$tissue <- bulk.meta$`Cell type`
+bulk.meta$tissue <- gsub("Accumbens", "NAc", bulk.meta$tissue)
+bulk.meta$tissue <- gsub("Brain stem", "brainstem", bulk.meta$tissue)
+bulk.meta$condition <- bulk.meta$Condition1
+bulk.meta$condition <- gsub("Vehicle", "vehicle", bulk.meta$condition)
+bulk.meta$condition <- gsub("MK", "molecule", bulk.meta$condition)
+bulk.meta$condition <- gsub("JOP11", "peptide", bulk.meta$condition)
+bulk.meta$condition <- gsub("JOP56", "conjugate", bulk.meta$condition)
+bulk.meta$name <- paste0(bulk.meta$tissue, bulk.meta$ID, "_", bulk.meta$condition)
+bulk.meta <- bulk.meta[,c("name", "ID", "tissue", "condition")]
+rownames(bulk.meta) <- bulk.meta$name
+
+# Load bulk count data
+txi <- readRDS("/projects/mludwig/Petersen-2022/data/bulk/jona-seq3_txi.rds")
+
+# Get gene IDs
+mapping.data <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), 
+                           header = T)
+gene.names <- mapping.data$gene_name_optimal[match(rownames(txi[[1]]), 
+                                                   mapping.data$ensembl_gene_id)]
+txi[[1]] <- txi[[1]][!(is.na(gene.names)),]
+rownames(txi[[1]]) <- as.character(na.omit(gene.names))
+txi[[2]] <- txi[[2]][!(is.na(gene.names)),]
+rownames(txi[[2]]) <- as.character(na.omit(gene.names))
+txi[[3]] <- txi[[3]][!(is.na(gene.names)),]
+rownames(txi[[3]]) <- as.character(na.omit(gene.names))
+
+# Subset NAc
+txi.NAc <- vector(length = length(txi), mode = "list")
+names(txi.NAc) <- names(txi)
+txi.NAc[[1]] <- txi[[1]][, grep("NAc", colnames(txi[[1]]))]
+txi.NAc[[2]] <- txi[[2]][, grep("NAc", colnames(txi[[2]]))]
+txi.NAc[[3]] <- txi[[3]][, grep("NAc", colnames(txi[[3]]))]
+txi.NAc[[4]] <- txi[[4]]
+bulk.meta.NAc <- bulk.meta[which(bulk.meta$tissue == "NAc"),]
+
+# Remove NAc33_vehicle which is an outlier on PC1
+txi.NAc[[1]] <- txi.NAc[[1]][, -(grep("NAc33_vehicle", colnames(txi.NAc[[1]])))]
+txi.NAc[[2]] <- txi.NAc[[2]][, -(grep("NAc33_vehicle", colnames(txi.NAc[[2]])))]
+txi.NAc[[3]] <- txi.NAc[[3]][, -(grep("NAc33_vehicle", colnames(txi.NAc[[3]])))]
+txi.NAc[[4]] <- txi.NAc[[4]]
+bulk.meta.NAc <- bulk.meta.NAc[-(grep("NAc33_vehicle", bulk.meta.NAc$name)),]
+```
+
+
+# Compute differentially expressed genes
+```{r}
+# Peptide vs. vehicle 
+txi.sub <- vector(length = length(txi.NAc), mode = "list")
+names(txi.sub) <- names(txi.NAc)
+txi.sub[[1]] <- txi.NAc[[1]][, grep("vehicle|peptide", colnames(txi.NAc[[1]]))]
+txi.sub[[2]] <- txi.NAc[[2]][, grep("vehicle|peptide", colnames(txi.NAc[[2]]))]
+txi.sub[[3]] <- txi.NAc[[3]][, grep("vehicle|peptide", colnames(txi.NAc[[3]]))]
+txi.sub[[4]] <- txi.NAc[[4]]
+
+bulk.meta.sub <- bulk.meta.NAc[grep("vehicle|peptide", bulk.meta.NAc$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "peptide"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.peptide <- results(dds, name="condition_peptide_vs_vehicle") 
+DEGs.peptide <- data.frame(DEGs.peptide)
+
+# Molecule vs. vehichle
+txi.sub <- vector(length = length(txi.NAc), mode = "list")
+names(txi.sub) <- names(txi.NAc)
+txi.sub[[1]] <- txi.NAc[[1]][, grep("vehicle|molecule", colnames(txi.NAc[[1]]))]
+txi.sub[[2]] <- txi.NAc[[2]][, grep("vehicle|molecule", colnames(txi.NAc[[2]]))]
+txi.sub[[3]] <- txi.NAc[[3]][, grep("vehicle|molecule", colnames(txi.NAc[[3]]))]
+txi.sub[[4]] <- txi.NAc[[4]]
+
+bulk.meta.sub <- bulk.meta.NAc[grep("vehicle|molecule", bulk.meta.NAc$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "molecule"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.molecule <- results(dds, name="condition_molecule_vs_vehicle") 
+DEGs.molecule <- data.frame(DEGs.molecule)
+
+# Conjugate vs. vehicle 
+txi.sub <- vector(length = length(txi.NAc), mode = "list")
+names(txi.sub) <- names(txi.NAc)
+txi.sub[[1]] <- txi.NAc[[1]][, grep("vehicle|conjugate", colnames(txi.NAc[[1]]))]
+txi.sub[[2]] <- txi.NAc[[2]][, grep("vehicle|conjugate", colnames(txi.NAc[[2]]))]
+txi.sub[[3]] <- txi.NAc[[3]][, grep("vehicle|conjugate", colnames(txi.NAc[[3]]))]
+txi.sub[[4]] <- txi.NAc[[4]]
+
+bulk.meta.sub <- bulk.meta.NAc[grep("vehicle|conjugate", bulk.meta.NAc$condition),]
+bulk.meta.sub$condition <- factor(bulk.meta.sub$condition, levels = c("vehicle", "conjugate"))
+dds <- DESeqDataSetFromTximport(txi.sub, bulk.meta.sub, ~condition)
+dds <- DESeq(dds)
+resultsNames(dds)
+DEGs.conjugate <- results(dds, name="condition_conjugate_vs_vehicle") 
+DEGs.conjugate <- data.frame(DEGs.conjugate)
+
+# Save
+DEGs.conjugate.save <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
+DEGs.conjugate.save <- DEGs.conjugate.save[order(DEGs.conjugate.save$pvalue),]
+DEGs.conjugate.save <- cbind(gene = rownames(DEGs.conjugate.save), DEGs.conjugate.save)
+
+write.xlsx(DEGs.conjugate.save, file = "/projects/mludwig/Petersen-2022/output/DEGs/NAc_DEGs_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
+```
+
+# Extended figure 11k
+```{r}
+# Construct venn diagram
+DEGs.peptide.venn <- DEGs.peptide[which(DEGs.peptide$padj < 0.05),]
+DEGs.molecule.venn <- DEGs.molecule[which(DEGs.molecule$padj < 0.05),]
+DEGs.conjugate.venn <- DEGs.conjugate[which(DEGs.conjugate$padj < 0.05),]
+
+genes <- union(union(rownames(DEGs.peptide.venn), rownames(DEGs.molecule.venn)), rownames(DEGs.conjugate.venn))
+venn.data <- data.frame(matrix(0, nrow = length(genes), ncol = 3))
+rownames(venn.data) <- genes
+colnames(venn.data) <- c("peptide", "molecule", "conjugate")
+
+venn.data$peptide[which(rownames(venn.data) %in% rownames(DEGs.peptide.venn))] <- 1
+venn.data$molecule[which(rownames(venn.data) %in% rownames(DEGs.molecule.venn))] <- 1
+venn.data$conjugate[which(rownames(venn.data) %in% rownames(DEGs.conjugate.venn))] <- 1
+
+# Plot
+pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:4]
+grid.newpage()
+png("/projects/mludwig/Petersen-2022/output/figures/efigure12k.png",
+    pointsize = 1,
+    width = 960, height = 960, res = 2250)
+draw.triple.venn(area1 = nrow(subset(venn.data, peptide == 1)), 
+                 area2 = nrow(subset(venn.data, molecule == 1)),
+                 area3 = nrow(subset(venn.data, conjugate == 1)), 
+                 n12 = nrow(subset(venn.data, peptide == 1 & molecule == 1)), 
+                 n23 = nrow(subset(venn.data, molecule == 1 & conjugate == 1)), 
+                 n13 = nrow(subset(venn.data, peptide == 1 & conjugate == 1)), 
+                 n123 = nrow(subset(venn.data, peptide == 1 & molecule == 1 & 
+                                      conjugate == 1)), 
+                 category = c("Peptide", "Molecule", "Conjugate"), 
+                 lty = "blank",
+                 fontfamily = "helvetica",
+                 cat.fontfamily = "helvetica",
+                 cat.fontface = "bold",
+                 fill = c(pal[[1]], pal[[2]], pal[[3]]),
+                 cat.dist = .1,
+                 margin = 0.05,
+                 cat.just = list(c(-1.5, 27), c(2, 27), c(0.5, -30))) 
+dev.off()
+```
+
+# Extended figure 11i
+```{r}
+# Construct volcano plot
+volcano <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
+volcano$label <- ""
+volcano$label[min_rank(volcano$padj) <= 15] <- rownames(volcano)[min_rank(volcano$padj) <= 15]
+volcano$col <- 4
+volcano$col[which(volcano$padj <= 0.05 & abs(volcano$log2FoldChange) >= 0.5)] <- 1
+volcano$col[which(volcano$padj <= 0.05 & abs(volcano$log2FoldChange) < 0.5)] <- 2
+volcano$col[which(volcano$padj > 0.05 & abs(volcano$log2FoldChange) >= 0.5)] <- 3
+volcano <- data.frame(volcano[, c("log2FoldChange", "padj", "col", "label")])
+
+# Plot
+volcano.plot <- ggplot(volcano, aes(y=(-log10(padj)), x=log2FoldChange, 
+                                    fill=factor(col), label=label)) +
+  xlab(expression(bold(paste(Log[2], " fold-change")))) + 
+  ylab(expression(paste(bold(-log[10]),bold("("), bolditalic("P"),
+                                   bold(")")))) + 
+  geom_point(shape = 21, size = 3, alpha = 1) + 
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-.5, .5), linetype = "dashed") + 
+  geom_text_repel(fontface="bold", size=3, color = "black") + theme_pubr() + 
+      theme(legend.position = "none",
+            axis.title = element_text(size=10, face="bold"),
+            axis.text = element_text(size=10, face="bold"))  + 
+      scale_fill_manual(values = c("1" = "#960000", "2" = "#CC9999", 
+                                   "3" = "grey40", "4" = "grey80")) 
+volcano.plot
+
+ggsave("/projects/mludwig/Petersen-2022/output/figures/efigure11i.png", 
+       volcano.plot, height = 120, width = 180,
+       units = "mm")
+```
+
+
+
