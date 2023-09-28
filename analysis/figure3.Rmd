@@ -23,9 +23,10 @@ library(stringr)
 library(gprofiler2)
 library(openxlsx)
 library(rlist)
+library(fgsea)
 ```
 
-# Load data
+# Load RNA-seq data
 ```{r}
 # Mapping data 
 mapping.data <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), 
@@ -62,7 +63,7 @@ colnames(bulk.counts) <- paste(colnames(bulk.counts),
 
 # Compute differentially expressed genes
 ```{r}
-# Vehicle vs. peptide
+# Peptide vs. vehicle
 counts.sub <- bulk.counts[, grep("vehicle|peptide", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "peptide"))
@@ -71,7 +72,7 @@ dds <- DESeq(dds)
 DEGs.peptide <- results(dds, name="condition_peptide_vs_vehicle") 
 DEGs.peptide <- data.frame(DEGs.peptide)
 
-# Vehicle vs. molecule
+# Molecule vs. vehicle
 counts.sub <- bulk.counts[, grep("vehicle|molecule", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "molecule"))
@@ -80,7 +81,7 @@ dds <- DESeq(dds)
 DEGs.molecule <- results(dds, name="condition_molecule_vs_vehicle") 
 DEGs.molecule <- data.frame(DEGs.molecule)
 
-# Vehicle vs. conjugate
+# Conjugate vs. vehicle
 counts.sub <- bulk.counts[, grep("vehicle|conjugate", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(counts.sub))
 condition <- factor(condition, levels = c("vehicle", "conjugate"))
@@ -88,11 +89,20 @@ dds <- DESeqDataSetFromMatrix(counts.sub, DataFrame(condition), ~ condition)
 dds <- DESeq(dds)
 DEGs.conjugate <- results(dds, name="condition_conjugate_vs_vehicle") 
 DEGs.conjugate <- data.frame(DEGs.conjugate)
+
+# Save 
+DEGs.conjugate.save <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
+DEGs.conjugate.save <- DEGs.conjugate.save[order(DEGs.conjugate.save$pvalue),]
+DEGs.conjugate.save <- cbind(gene = rownames(DEGs.conjugate.save), DEGs.conjugate.save)
+write.xlsx(DEGs.conjugate.save, 
+           file = "/projects/mludwig/Petersen-2022/output/DEGs/DEGs_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
 ```
 
 
-# Figure 2d
+# Figure 3d
 ```{r}
+# Construct venn diagram
 DEGs.peptide.venn <- DEGs.peptide[which(DEGs.peptide$padj < 0.05),]
 DEGs.molecule.venn <- DEGs.molecule[which(DEGs.molecule$padj < 0.05),]
 DEGs.conjugate.venn <- DEGs.conjugate[which(DEGs.conjugate$padj < 0.05),]
@@ -106,8 +116,8 @@ venn.data$peptide[which(rownames(venn.data) %in% rownames(DEGs.peptide.venn))] <
 venn.data$molecule[which(rownames(venn.data) %in% rownames(DEGs.molecule.venn))] <- 1
 venn.data$conjugate[which(rownames(venn.data) %in% rownames(DEGs.conjugate.venn))] <- 1
 
+# Plot
 pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:4]
-
 grid.newpage()
 png("/projects/mludwig/Petersen-2022/output/figures/figure3d.png",
     pointsize = 1,
@@ -132,8 +142,9 @@ draw.triple.venn(area1 = nrow(subset(venn.data, peptide == 1)),
 dev.off()
 ```
 
-# Figure 2e
+# Figure 3e
 ```{r}
+# Construct volcano plot
 volcano <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
 volcano$label <- ""
 volcano$label[min_rank(volcano$padj) <= 15] <- rownames(volcano)[min_rank(volcano$padj) <= 15]
@@ -160,35 +171,36 @@ volcano.plot <- ggplot(volcano, aes(y=(-log10(padj)), x=log2FoldChange,
                                    "3" = "grey40", "4" = "grey80")) 
 volcano.plot
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3e.png", volcano.plot, height = 60, width = 90,
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3e.png", 
+       volcano.plot, height = 60, width = 90,
        units = "mm")
 ```
 
-```{r}
-DEGs.conjugate.save <- DEGs.conjugate[!(is.na(DEGs.conjugate$padj)), ]
-DEGs.conjugate.save <- DEGs.conjugate.save[order(DEGs.conjugate.save$pvalue),]
-DEGs.conjugate.save <- cbind(gene = rownames(DEGs.conjugate.save), DEGs.conjugate.save)
-
-write.xlsx(DEGs.conjugate.save, file = "/projects/mludwig/Petersen-2022/output/DEGs/DEGs_conjugate_vs_vehicle.xlsx",
-           rowNames = F)
-```
 
 # Figure 3g
 ```{r}
+# Identify top GO terms
 query <- rownames(DEGs.conjugate.venn)
 
 module.GO.terms <- gost(query = query,
                         organism = "mmusculus",
                         ordered_query = F, correction_method = "fdr",
-                        exclude_iea = T, 
+                        exclude_iea = T,
                         sources = c("GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"),
                         evcodes = T)
 
-GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value, intersection_size, intersection, term_id) %>%
+GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value,
+                                            intersection_size, intersection, term_id) %>%
   filter(term_size <= 500) %>% arrange(p_value) %>% top_n(5, -p_value) %>%
   mutate(x = fct_reorder(str_wrap(term_name, 20), -p_value)) %>%
   mutate(y = -log10(p_value))
 
+# Save
+write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")],
+           file = "/projects/mludwig/Petersen-2022/output/GO_terms/GO_terms_conjugate_vs_vehicle.xlsx",
+           rowNames = F)
+
+# Plot
 GO.plot <- ggplot(GO.terms, aes(x,y)) + 
   geom_col(colour="black", width=1, fill="#D69C4E", alpha=0.5, size=0.3) +
   theme_pubr(legend="none") + 
@@ -203,19 +215,14 @@ GO.plot <- ggplot(GO.terms, aes(x,y)) +
                                        bolditalic("P"),bold(")")))) 
 GO.plot
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3g.png", GO.plot, height = 42, width = 70,
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3g.png", 
+       GO.plot, height = 42, width = 70,
        units = "mm")
-```
-
-
-```{r}
-write.xlsx(GO.terms[, !(colnames(GO.terms) == "intersection")],
-           file = "/projects/mludwig/Petersen-2022/output/GO_terms/GO_terms_conjugate_vs_vehicle.xlsx",
-           rowNames = F)
 ```
 
 # Figure 3f
 ```{r}
+# Identify differentially expressed genes intersecting with top GO terms
 GO.genes <- lapply(GO.terms$intersection, noquote)
 GO.genes <- lapply(GO.genes, function(x) str_split(x, pattern = ","))
 GO.genes <- unique(unlist(GO.genes))
@@ -241,7 +248,7 @@ GO.genes.data <- rbind(GO.genes.data1, GO.genes.data2, GO.genes.data3)
 GO.genes.data$size <- -log10(GO.genes.data$padj)
 GO.genes.data$treatment <- factor(GO.genes.data$treatment, levels = c("GLP-1", "MK-801", "GLP-1/MK-801"))
 
-
+# Plot
 GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
    geom_tile(size = 1, color = "white", fill="grey99") +
   geom_point(aes(size = size, color = log2FoldChange)) + 
@@ -264,178 +271,7 @@ GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
          shape = guide_legend(title.vjust = 0.8))
 GO.genes.plot
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3f.png", GO.genes.plot, height = 60, width = 180,
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3f.png", 
+       GO.genes.plot, height = 60, width = 180,
        units = "mm")
 ```       
-
-<!-- # GWAS plot -->
-<!-- ```{r} -->
-<!-- LDSC.output <- read.csv("/projects/mludwig/Petersen-2022/output/LDSC/LDSC_output_GO_genes_conjugate_vs_vehicle.txt", -->
-<!--                         sep = "\t") -->
-<!-- LDSC.output$Name <- gsub("GO_genes_conjugate_vs_vehicle__", "", LDSC.output$Name) -->
-<!-- LDSC.output <- LDSC.output[, c("Name", "Coefficient_P_value")] -->
-<!-- colnames(LDSC.output) <- c("term", "p.value") -->
-<!-- LDSC.output$method <- "LDSC" -->
-
-<!-- MAGMA.output <- read.csv("/projects/mludwig/Petersen-2022/output/MAGMA/MAGMA_output_GO_genes_conjugate_vs_vehicle.gsa.out", -->
-<!--                          skip = 3, sep = "") -->
-<!-- MAGMA.output <- MAGMA.output[, c("VARIABLE", "P")] -->
-<!-- colnames(MAGMA.output) <- c("term", "p.value") -->
-<!-- MAGMA.output$method <- "MAGMA" -->
-
-
-<!-- GWAS.data <- rbind(LDSC.output, MAGMA.output) -->
-<!-- GWAS.data$p.adj <- p.adjust(GWAS.data$p.value, method = "fdr") -->
-<!-- GWAS.data$term <- gsub("_", " ", GWAS.data$term) -->
-<!-- GWAS.data$term <- factor(GWAS.data$term, levels = rev(GO.terms$term_name)) -->
-
-<!-- for (i in 1:nrow(GWAS.data)) { -->
-<!--   term <- as.character(GWAS.data$term[i]) -->
-<!--   n.genes <- length(GO.list[[term]]$gene) -->
-<!--   GWAS.data$n.genes[i] <- n.genes -->
-<!-- } -->
-
-<!-- GWAS.data$term <- paste0(GWAS.data$term, "\n (", GWAS.data$n.genes, " genes)") -->
-<!-- GWAS.data$term <- factor(GWAS.data$term, levels = rev(c("neuron to neuron synapse\n (125 genes)", -->
-<!--                                                         "glutamatergic synapse\n (138 genes)", -->
-<!--                                                         "asymmetric synapse\n (115 genes)", -->
-<!--                                                         "postsynaptic specialization\n (120 genes)", -->
-<!--                                                         "postsynaptic density\n (112 genes)"))) -->
-<!-- GWAS.data$method <- factor(GWAS.data$method, levels = c("LDSC", "MAGMA")) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- GWAS.plot <- ggplot(GWAS.data, aes(term, -log10(p.adj), fill = method)) +  -->
-<!--   geom_col(colour="black", alpha=1, size=0.3, width = 0.8, position = "dodge") + -->
-<!--   theme_pubr(legend="right") +  -->
-<!--   theme(axis.text.x = element_text(size=8, face="bold"), -->
-<!--         axis.text.y = element_text(size=8, face="bold"), -->
-<!--         axis.title.x = element_text(size=8, face="bold"), -->
-<!--         legend.title = element_blank(), -->
-<!--         # margin: top, right, bottom, and left -->
-<!--         plot.margin = unit(c(0, 0.5, 0, 0), "cm")) + -->
-<!--   coord_flip() + -->
-<!--   xlab(NULL) + ylab(expression(paste(bold(-log[10]),bold("("), bolditalic("P"), -->
-<!--                                    bold(")")))) +  -->
-<!--     geom_hline(yintercept = -log10(0.05), lty = 2) + -->
-<!--   scale_fill_manual(values = c("darkseagreen", "darkslategray"), limits = c("MAGMA", "LDSC")) -->
-
-<!-- GWAS.plot -->
-
-<!-- ``` -->
-
-# Figure 3x
-```{r}
-genes.peptide <- rownames(DEGs.peptide)[which(DEGs.peptide$padj < 0.05)]
-genes.conjugate <- rownames(DEGs.conjugate)[which(DEGs.conjugate$padj < 0.05)]
-
-genes.union <- union(genes.peptide, genes.conjugate)
-genes.intersect <- intersect(genes.peptide, genes.conjugate)
-
-genes.common <- data.frame(cbind(DEGs.peptide[genes.union, "log2FoldChange"], 
-                                 DEGs.conjugate[genes.union, "log2FoldChange"]))  
-
-rownames(genes.common) <- genes.union
-
-colnames(genes.common) <- c("Peptide", "Conjugate")
-genes.common$treatment <- ""
-genes.common$treatment[which(genes.union %in% genes.peptide)] <- "Peptide"
-genes.common$treatment[which(genes.union %in% genes.conjugate)] <- "Conjugate"
-genes.common$treatment[which(genes.union %in% genes.intersect)] <- "Peptide &\nconjugate"
-genes.common$treatment <- factor(genes.common$treatment, 
-                                levels = c("Peptide", "Conjugate", "Peptide &\nconjugate"))
-
-genes.common <- genes.common[sample(nrow(genes.common)),]
-
-# Colors
-pal <- c("#C27D38", "#CCC591", "#5B1A18")
-
-# Plot
-plot.3x <- ggplot(genes.common, aes(x = Peptide, y = Conjugate, fill = treatment)) + 
-  geom_point(shape = 21, size = 3, alpha = 1)  +
-  xlim(-5,5) + ylim(-5,5) +
-  xlab(expression(bold(atop("Log"[2] *" fold-change", "GLP-1")))) +
-  ylab(expression(bold(atop("Log"[2] *" fold-change", "GLP-1/MK-801")))) +
-  theme_pubr(legend="top") + theme(panel.border = element_blank(), 
-                     panel.grid.major = element_blank(),
-                     panel.grid.minor = element_blank(), 
-                     axis.line = element_line(colour = "black"),
-                     axis.title.x = element_text(size=10, face="bold"),
-                     axis.title.y = element_text(size=10, face="bold"),
-                     axis.text = element_text(size=10, face="bold"),
-                     legend.text = element_text(size=10, face="bold"),
-                     legend.title = element_blank(), 
-                     legend.spacing.x = unit(-0.005, "cm"),
-                     plot.margin = unit(c(0, 0, 0, 0), "cm")) +
-  scale_fill_manual(values = pal, labels = c("GLP-1", "GLP-1/MK-801", "GLP-1 &\nGLP-1/MK-801")) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-
-plot.3x
-
-```
-
-
-```{r}
-genes.common <- cbind(gene = rownames(genes.common), genes.common)
-write.xlsx(genes.common,
-           file = "/projects/mludwig/Petersen-2022/output/DEGs/genes_cor_conjugate_vs_peptide.xlsx",
-           rowNames = F)
-```
-
-# Figure 3y
-```{r}
-genes.molecule <- rownames(DEGs.molecule)[which(DEGs.molecule$padj < 0.05)]
-genes.conjugate <- rownames(DEGs.conjugate)[which(DEGs.conjugate$padj < 0.05)]
-
-genes.union <- union(genes.molecule, genes.conjugate)
-genes.intersect <- intersect(genes.molecule, genes.conjugate)
-
-genes.common <- data.frame(cbind(DEGs.molecule[genes.union, "log2FoldChange"], 
-                                 DEGs.conjugate[genes.union, "log2FoldChange"]))  
-
-rownames(genes.common) <- genes.union
-
-colnames(genes.common) <- c("Molecule", "Conjugate")
-genes.common$treatment <- ""
-genes.common$treatment[which(genes.union %in% genes.molecule)] <- "Molecule"
-genes.common$treatment[which(genes.union %in% genes.conjugate)] <- "Conjugate"
-genes.common$treatment[which(genes.union %in% genes.intersect)] <- "Molecule &\nconjugate"
-genes.common$treatment <- factor(genes.common$treatment, 
-                                levels = c("Molecule", "Conjugate", "Molecule &\nconjugate"))
-
-genes.common <- genes.common[sample(nrow(genes.common)),]
-
-# Colors
-pal <- c("#C27D38", "#CCC591", "#5B1A18")
-
-# Plot
-plot.3y <- ggplot(genes.common, aes(x = Molecule, y = Conjugate, fill = treatment)) + 
-  geom_point(shape = 21, size = 3, alpha = 1)  +
-  xlim(-5,5) + ylim(-5,5) +
-  xlab(expression(bold(atop("Log"[2] *" fold-change", "MK-801")))) +
-  ylab(expression(bold(atop("Log"[2] *" fold-change", "GLP-1/MK-801")))) +
-  theme_pubr(legend="top") + theme(panel.border = element_blank(), 
-                     panel.grid.major = element_blank(),
-                     panel.grid.minor = element_blank(), 
-                     axis.line = element_line(colour = "black"),
-                     axis.title.x = element_text(size=10, face="bold"),
-                     axis.title.y = element_text(size=10, face="bold"),
-                     axis.text = element_text(size=10, face="bold"),
-                     legend.text = element_text(size=10, face="bold"),
-                     legend.title = element_blank(), 
-                     legend.spacing.x = unit(-0.005, "cm"),
-                     plot.margin = unit(c(0, 0, 0, 0), "cm")) +
-  scale_fill_manual(values = pal, labels = c("MK-801", "GLP-1/MK-801", "MK-801 &\nGLP-1/MK-801")) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-
-plot.3y
-```
-
-
-```{r}
-genes.common <- cbind(gene = rownames(genes.common), genes.common)
-write.xlsx(genes.common,
-           file = "/projects/mludwig/Petersen-2022/output/DEGs/genes_cor_conjugate_vs_molecule.xlsx",
-           rowNames = F)
-```
-
