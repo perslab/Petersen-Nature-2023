@@ -1,5 +1,5 @@
 ---
-title: "prepare_GWAS_enrichment_analysis"
+title: "LDSC_and_MAGMA_input"
 author: "Mette Ludwig"
 date: "2022-01-06"
 output: workflowr::wflow_html
@@ -60,7 +60,7 @@ colnames(bulk.counts) <- paste(colnames(bulk.counts),
                                                          bulk.meta$sample)], sep = "_")
 ```
 
-# Load mouse to human mapping data
+# Load mouse-to-human mapping data
 ```{r}
 mapping.data1 <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/Mus_musculus.GRCm38.90.gene_name_version2ensembl.txt.gz"), header = T)
 mapping.data2 <- read.table(gzfile("/projects/mludwig/Ludwig-2021/data/gene_info/map_hsapiens_mmusculus.gz"), header = T)
@@ -68,10 +68,9 @@ mapping.data3 <- read.csv("/projects/mludwig/DVC/data/gene_info/NCBI37.3.gene.lo
 colnames(mapping.data3) <- c("ENTREZID", "chr", "start", "end", "strand", "ALIAS")
 ```
 
-
 # Repeat GO analysis of differentially expressed genes 
 ```{r}
-# vehicle vs. conjugate
+# Conjugate vs. vehicle
 sub.counts <- bulk.counts[, grep("vehicle|conjugate", colnames(bulk.counts))]
 condition <- gsub(".*_", "", colnames(sub.counts))
 condition <- factor(condition, levels = c("vehicle", "conjugate"))
@@ -97,9 +96,9 @@ GO.terms <- module.GO.terms[[1]] %>% select(term_name, term_size, p_value, inter
 GO.terms
 ```
 
-Input for LDSC
+# Generate input for LDSC
 ```{r}
-# Extract genes in GO terms
+# Extract differentially genes in top GO terms
 GO.list <- list()
 for (i in GO.terms$term_name) {
   GO.genes <- GO.terms$intersection[which(GO.terms$term_name == i)]
@@ -113,16 +112,14 @@ for (i in GO.terms$term_name) {
 
 all.genes <- rownames(bulk.counts)[which(apply(bulk.counts, 1, sd) != 0)]
 GO.data.LDSC <- data.frame(matrix(0, nrow = length(all.genes), ncol = length(GO.list)))
-
 rownames(GO.data.LDSC) <- all.genes
 colnames(GO.data.LDSC) <- names(GO.list)
-  
 for (GO in names(GO.list)) {
   genes <- GO.list[[GO]]$gene
   GO.data.LDSC[genes, GO] <- 1
 }
 
-# Map tohuman ENSEMBL IDs
+# Map genes to human ENSEMBL IDs
 GO.data.LDSC$gene <- mapping.data1$ensembl_gene_id[match(rownames(GO.data.LDSC), mapping.data1$gene_name_optimal)]
 GO.data.LDSC$gene <- mapping.data2$ensembl_gene_id[
   match(GO.data.LDSC$gene, mapping.data2$mmusculus_homolog_ensembl_gene)]
@@ -130,13 +127,15 @@ GO.data.LDSC <- GO.data.LDSC[!is.na(GO.data.LDSC$gene),]
 GO.data.LDSC <- GO.data.LDSC[, c("gene", colnames(GO.data.LDSC)[-ncol(GO.data.LDSC)])]
 colnames(GO.data.LDSC) <- gsub("\\ ", "_", colnames(GO.data.LDSC))
 
+# Save
 write.table(GO.data.LDSC,
            file = "/projects/mludwig/Petersen-2022/output/LDSC/LDSC_input_GO_genes_conjugate_vs_vehicle.csv",
             row.names = F, sep = ",")
 ```
 
-# Input for MAGMA
+# Input for MAGMA analysis
 ```{r}
+# Map genes to Entrez IDs
 for (i in 1:length(GO.list)) {
   
   term <- names(GO.list)[i]
@@ -154,8 +153,10 @@ for (i in 1:length(GO.list)) {
    }
 }
 
+# Save
 write.table(GO.data.MAGMA,
             file = "/projects/mludwig/Petersen-2022/output/MAGMA/MAGMA_input_GO_genes_conjugate_vs_vehicle.txt",
           row.names = F, sep = "\t", quote = F, col.names = F)
 ```
+
 
