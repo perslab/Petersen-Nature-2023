@@ -273,7 +273,7 @@ GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
                                      italic("P"), ")")),
              range = c(0, 3), limits = c(0, max(GO.genes.data$size)),
              breaks = c(2, 4, 6)) +
-  scale_color_gradient2(low = "midnightblue", mid = "white", high = "red4",
+  scale_color_gradient2(low = "#28A1F1", mid = "white", high = "#D9393A",
                         breaks = c(seq(-1.5, 1.5, 0.5)),
                         name = expression(paste(log[2]," fold change"))) +
   theme_pubr(legend = "top") + xlab(NULL) + ylab(NULL) + 
