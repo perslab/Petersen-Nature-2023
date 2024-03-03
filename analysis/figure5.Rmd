@@ -132,7 +132,7 @@ venn.data$conjugate1[which(rownames(venn.data) %in% rownames(DEGs.conjugate1.ven
 pal <- wes_palette("Darjeeling2", 4, type = "discrete")[2:3]
 
 grid.newpage()
-png("/projects/mludwig/Petersen-2022/output/figures/figure5a.png",
+png("/projects/mludwig/Petersen-2022/output/figures/figure5b.png",
     pointsize = 1,
     width = 960, height = 960, res = 2250)
 
@@ -203,7 +203,7 @@ volcano.plot <- ggplot(volcano, aes(y=(-log10(padj)), x=log2FoldChange,
                                    "3" = "grey40", "4" = "grey80")) 
 volcano.plot
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5d.png", 
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5e.png", 
        volcano.plot, height = 60, width = 90,
        units = "mm")
 ```
@@ -245,7 +245,7 @@ GO.plot <- ggplot(GO.terms, aes(x,y)) +
 GO.plot
 
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5c.png", 
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5d.png", 
        GO.plot, height = 42, width = 70,
        units = "mm")
 ```
@@ -298,7 +298,7 @@ plot1 <- plot_grid(get_legend(GO.genes.plot),
                    align = "v", axis = "lr", ncol = 1, 
                    rel_heights = c(2, 3.5))
 plot1
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5b.pdf",        
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure5c.pdf",        
        plot1, height = 1.2, width = 2.66, units = "in", dpi = 1500)
 
 ```
