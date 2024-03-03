@@ -24,6 +24,7 @@ library(gprofiler2)
 library(openxlsx)
 library(rlist)
 library(fgsea)
+library(cowplot)
 ```
 
 # Load RNA-seq data
@@ -252,26 +253,34 @@ GO.genes.data$treatment <- factor(GO.genes.data$treatment, levels = c("GLP-1", "
 GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
    geom_tile(size = 1, color = "white", fill="grey99") +
   geom_point(aes(size = size, color = log2FoldChange)) + 
-  scale_size(name = expression(paste(bold(-log[10]),bold("("),
-                                     bolditalic("P"),bold(")"))),
-             range = c(0, 8), breaks = c(2, 7, 12),
+  scale_size(name = expression(paste(-log[10],"(",
+                                     italic("P"),")")),
+             range = c(0, 3), breaks = c(2, 7, 12),
              limits = c(0, max(GO.genes.data$size))) +
-  scale_color_gradient2(low = "#3C5488B2", mid = "white", high = "#DC0000B2",
+  scale_color_gradient2(low = "midnightblue", mid = "white", high = "red4",
                          breaks = c(seq(-1.5, 1.5, 0.5)),
-                        name = expression(paste(bold(log[2]),bold(" fold change")))) +
+                        name = expression(paste(log[2]," fold change"))) +
   theme_pubr(legend = "top") + xlab(NULL) + ylab(NULL) + 
-  theme(axis.text.x = element_text(size=10, face="bold", angle=45, hjust = 1), 
-        axis.text.y = element_text(size=10, face="bold"),
-        legend.title = element_text(size=10, face="bold"), 
-        legend.text = element_text(size=10, face="bold"),
-        axis.line = element_line(colour = "black"),
+  theme(axis.text.x = element_text(size=6, angle=45, hjust = 1), 
+        axis.text.y = element_text(size=6),
+        axis.ticks.x = element_line(colour = "black", size = 0.3),
+        legend.title = element_text(size=5), 
+        legend.text = element_text(size=5),
+        legend.spacing.x = unit(-0.2, "mm"),
+        legend.key.width=unit(5, "mm"),
+        axis.line = element_line(colour = "black", size = 0.3),
         # margin: top, right, bottom, and left
-        plot.margin = unit(c(0, 0, 0, 1), "cm")) +
-  guides(color = guide_colorbar(title.vjust = 0.8),
-         shape = guide_legend(title.vjust = 0.8))
-GO.genes.plot
+        plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.box.margin = unit(c(0, 0, 0, 0), "cm"),
+        text=element_text(family="sans")) +
+    guides(color = guide_colorbar(title.vjust = 0.7, order = 2),
+           size = guide_legend(title.vjust = 0.5, order = 1))
 
-ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3f.png", 
-       GO.genes.plot, height = 60, width = 180,
-       units = "mm")
-```       
+plot1 <- plot_grid(get_legend(GO.genes.plot),
+                   GO.genes.plot + theme(legend.position = "none"),
+                   align = "v", axis = "lr", ncol = 1, 
+                   rel_heights = c(2, 5))
+
+ggsave("/projects/mludwig/Petersen-2022/output/figures/figure3f.pdf",        
+       plot1, height = 1.5, width = 2.66, units = "in", dpi = 1500)
+```
