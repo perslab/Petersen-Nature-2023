@@ -255,7 +255,7 @@ GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
   geom_point(aes(size = size, color = log2FoldChange)) + 
   scale_size(name = expression(paste(-log[10],"(",
                                      italic("P"),")")),
-             range = c(0, 3), breaks = c(2, 7, 12),
+             range = c(0, 2.7), breaks = c(2, 7, 12),
              limits = c(0, max(GO.genes.data$size))) +
   scale_color_gradient2(low = "#28A1F1", mid = "white", high = "#D9393A",
                          breaks = c(seq(-1.5, 1.5, 0.5)),
@@ -266,15 +266,16 @@ GO.genes.plot <- ggplot(GO.genes.data, aes(x = gene, y=treatment)) +
         axis.ticks.x = element_line(colour = "black", size = 0.3),
         legend.title = element_text(size=5), 
         legend.text = element_text(size=5),
-        legend.spacing.x = unit(-0.2, "mm"),
-        legend.key.width=unit(5, "mm"),
+        legend.spacing.x = unit(1, "mm"),
+        legend.key.width=unit(3, "mm"),
+        legend.key.height = unit(3, "mm"),
         axis.line = element_line(colour = "black", size = 0.3),
         # margin: top, right, bottom, and left
         plot.margin = unit(c(0, 0, 0, 0), "cm"),
         legend.box.margin = unit(c(0, 0, 0, 0), "cm"),
         text=element_text(family="sans")) +
-    guides(color = guide_colorbar(title.vjust = 0.7, order = 2),
-           size = guide_legend(title.vjust = 0.5, order = 1))
+    guides(color = guide_colorbar(title.vjust = 0.8, order = 2),
+           size = guide_legend(title.vjust = 0.4, order = 1))
 
 plot1 <- plot_grid(get_legend(GO.genes.plot),
                    GO.genes.plot + theme(legend.position = "none"),
